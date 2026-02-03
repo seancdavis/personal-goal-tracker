@@ -8,13 +8,15 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:migrate": "netlify dev:exec drizzle-kit migrate",
+    "db:push": "netlify dev:exec drizzle-kit push",
+    "db:studio": "netlify dev:exec drizzle-kit studio"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
     "@netlify/blobs": "^8.1.0",
     "@netlify/functions": "^2.8.2",
+    "@netlify/neon": "^0.1.2",
     "drizzle-orm": "^0.36.4",
     "lucide-react": "^0.468.0",
     "marked": "^15.0.4",

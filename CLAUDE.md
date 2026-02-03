@@ -19,8 +19,9 @@ npm run dev          # Start Vite dev server
 npm run build        # TypeScript check + Vite build
 npm run lint         # ESLint check
 npm run db:generate  # Generate Drizzle migrations
-npm run db:migrate   # Run migrations
-npm run db:studio    # Open Drizzle Studio
+npm run db:migrate   # Run migrations (via Netlify)
+npm run db:push      # Push schema changes (via Netlify)
+npm run db:studio    # Open Drizzle Studio (via Netlify)
 ```
 
 ## Architecture
@@ -83,5 +84,5 @@ Ensure database is initialized:
 ```bash
 netlify db init --boilerplate=drizzle
 npm run db:generate
-npm run db:migrate
+npm run db:push
 ```
