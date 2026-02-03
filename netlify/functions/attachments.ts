@@ -1,73 +1,62 @@
-import type { Context } from "@netlify/functions";
+import type { Config, Context } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
 import { eq } from "drizzle-orm";
-import { db, schema } from "./_shared/db";
-import { json, error, notFound, methodNotAllowed } from "./_shared/response";
+import { db, schema } from "./_shared/db.js";
+import { json, error, notFound, methodNotAllowed } from "./_shared/response.js";
 
-export default async function handler(req: Request, context: Context) {
+export const config: Config = {
+  path: ["/api/attachments/:id", "/api/attachments/blob/*"],
+};
+
+async function handleDelete(id: number): Promise<Response> {
+  const [attachment] = await db
+    .select()
+    .from(schema.attachments)
+    .where(eq(schema.attachments.id, id));
+
+  if (!attachment) {
+    return notFound("Attachment not found");
+  }
+
+  const store = getStore("attachments");
+  await store.delete(attachment.blobKey);
+
+  await db.delete(schema.attachments).where(eq(schema.attachments.id, id));
+
+  return json({ success: true });
+}
+
+async function handleGetBlob(blobPath: string): Promise<Response> {
+  const store = getStore("attachments");
+  const blob = await store.get(blobPath, { type: "arrayBuffer" });
+
+  if (!blob) {
+    return notFound("Attachment not found");
+  }
+
+  const metadata = await store.getMetadata(blobPath);
+  const mimeType = metadata?.metadata?.mimeType || "application/octet-stream";
+
+  return new Response(blob, {
+    headers: {
+      "Content-Type": mimeType,
+    },
+  });
+}
+
+export default async function handler(req: Request, context: Context): Promise<Response> {
+  const { id } = context.params;
   const url = new URL(req.url);
-  const pathParts = url.pathname.replace("/api/attachments", "").split("/").filter(Boolean);
-  const firstPart = pathParts[0];
-  const secondPart = pathParts[1];
+  const isBlobRoute = url.pathname.includes("/blob/");
 
   try {
-    // GET /api/attachments?noteId=X - List attachments by note
-    if (req.method === "GET" && !firstPart) {
-      const noteId = url.searchParams.get("noteId");
-      if (!noteId) return error("noteId query parameter is required");
-
-      const attachments = await db
-        .select()
-        .from(schema.attachments)
-        .where(eq(schema.attachments.noteId, parseInt(noteId, 10)));
-
-      return json(attachments);
+    if (isBlobRoute && req.method === "GET") {
+      const blobPath = url.pathname.replace("/api/attachments/blob/", "");
+      return handleGetBlob(blobPath);
     }
 
-    // GET /api/attachments/blob/:blobKey - Get blob content
-    if (req.method === "GET" && firstPart === "blob" && secondPart) {
-      // Reconstruct the full blob key from the remaining path
-      const blobKey = pathParts.slice(1).join("/");
-
-      const store = getStore("attachments");
-      const blob = await store.get(blobKey, { type: "arrayBuffer" });
-
-      if (!blob) {
-        return notFound("Attachment not found");
-      }
-
-      // Get metadata for content type
-      const metadata = await store.getMetadata(blobKey);
-      const mimeType = metadata?.metadata?.mimeType || "application/octet-stream";
-
-      return new Response(blob, {
-        headers: {
-          "Content-Type": mimeType,
-        },
-      });
-    }
-
-    // DELETE /api/attachments/:id - Delete attachment
-    if (req.method === "DELETE" && firstPart && firstPart !== "blob") {
-      const attachmentId = parseInt(firstPart, 10);
-
-      const [attachment] = await db
-        .select()
-        .from(schema.attachments)
-        .where(eq(schema.attachments.id, attachmentId));
-
-      if (!attachment) {
-        return notFound("Attachment not found");
-      }
-
-      // Delete from blob store
-      const store = getStore("attachments");
-      await store.delete(attachment.blobKey);
-
-      // Delete from database
-      await db.delete(schema.attachments).where(eq(schema.attachments.id, attachmentId));
-
-      return json({ success: true });
+    if (id && req.method === "DELETE") {
+      return handleDelete(parseInt(id, 10));
     }
 
     return methodNotAllowed();

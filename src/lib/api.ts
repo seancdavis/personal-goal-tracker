@@ -50,7 +50,7 @@ export const weeksApi = {
 // Tasks API
 export const tasksApi = {
   listByWeek: (weekId: string) =>
-    request<TaskWithCategory[]>(`/tasks?weekId=${weekId}`),
+    request<TaskWithCategory[]>(`/weeks/${weekId}/tasks`),
   get: (id: number) => request<TaskWithCategory>(`/tasks/${id}`),
   create: (data: Partial<Task>) =>
     request<Task>("/tasks", {
@@ -110,9 +110,9 @@ export const recurringTasksApi = {
 // Notes API
 export const notesApi = {
   listByTask: (taskId: number) =>
-    request<Note[]>(`/notes?taskId=${taskId}`),
+    request<Note[]>(`/tasks/${taskId}/notes`),
   listByBacklogItem: (backlogItemId: number) =>
-    request<Note[]>(`/notes?backlogItemId=${backlogItemId}`),
+    request<Note[]>(`/backlog/${backlogItemId}/notes`),
   get: (id: number) => request<Note>(`/notes/${id}`),
   create: (data: Partial<Note>) =>
     request<Note>("/notes", {
@@ -131,7 +131,7 @@ export const notesApi = {
 // Attachments API
 export const attachmentsApi = {
   listByNote: (noteId: number) =>
-    request<Attachment[]>(`/attachments?noteId=${noteId}`),
+    request<Attachment[]>(`/notes/${noteId}/attachments`),
   upload: async (noteId: number, file: File) => {
     const formData = new FormData();
     formData.append("file", file);
@@ -192,7 +192,7 @@ export const followUpsApi = {
 // Week Generation API
 export const generateWeekApi = {
   getData: (previousWeekId: string) =>
-    request<WeekGenerationData>(`/generate-week/data?previousWeekId=${previousWeekId}`),
+    request<WeekGenerationData>(`/generate-week/data/${previousWeekId}`),
   generate: (payload: GenerateWeekPayload) =>
     request<Week>("/generate-week", {
       method: "POST",
