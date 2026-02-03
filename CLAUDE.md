@@ -71,8 +71,9 @@ Both raw markdown AND rendered HTML are stored in the database. Rendering happen
 
 ## Environment Variables
 
-Required for Netlify deployment:
-- `DATABASE_URL` - NeonDB connection string (set via Netlify DB)
+Automatically set by Netlify DB:
+- `NETLIFY_DATABASE_URL` - Pooled connection (used by functions via @netlify/neon)
+- `NETLIFY_DATABASE_URL_UNPOOLED` - Direct connection (used by drizzle-kit migrations)
 
 ## Deployment
 
