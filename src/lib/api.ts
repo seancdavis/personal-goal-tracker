@@ -190,11 +190,11 @@ export const followUpsApi = {
 };
 
 // Week Generation API
-export const generateWeekApi = {
-  getData: (previousWeekId: string) =>
-    request<WeekGenerationData>(`/generate-week/data/${previousWeekId}`),
+export const weekGenerationApi = {
+  getData: (previousWeekId?: string) =>
+    request<WeekGenerationData>(previousWeekId ? `/weeks/new/data/${previousWeekId}` : `/weeks/new/data`),
   generate: (payload: GenerateWeekPayload) =>
-    request<Week>("/generate-week", {
+    request<Week>("/weeks/new", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

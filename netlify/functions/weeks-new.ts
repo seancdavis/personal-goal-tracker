@@ -4,7 +4,7 @@ import { db, schema } from "./_shared/db.js";
 import { json, error, methodNotAllowed } from "./_shared/response.js";
 
 export const config: Config = {
-  path: ["/api/generate-week", "/api/generate-week/data/:previousWeekId"],
+  path: ["/api/weeks/new", "/api/weeks/new/data", "/api/weeks/new/data/:previousWeekId"],
 };
 
 function getWeekStartDate(weekId: string): string {
@@ -278,7 +278,7 @@ async function handleGenerate(req: Request): Promise<Response> {
 export default async function handler(req: Request, context: Context): Promise<Response> {
   const { previousWeekId } = context.params;
   const url = new URL(req.url);
-  const isDataRoute = url.pathname.includes("/data/");
+  const isDataRoute = url.pathname.includes("/data");
 
   try {
     if (isDataRoute && req.method === "GET") {
@@ -291,7 +291,7 @@ export default async function handler(req: Request, context: Context): Promise<R
 
     return methodNotAllowed();
   } catch (err) {
-    console.error("Generate week API error:", err);
+    console.error("Week generation API error:", err);
     return error("Internal server error", 500);
   }
 }

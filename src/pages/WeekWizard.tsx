@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
-import { generateWeekApi, weeksApi } from "@/lib/api";
+import { weekGenerationApi, weeksApi } from "@/lib/api";
 import { getCurrentWeekId, getNextWeekId, formatWeekRange } from "@/lib/dates";
 import type {
   WizardRecurringTask,
@@ -73,14 +73,14 @@ export function WeekWizard() {
 
       // Load generation data if we have a previous week
       if (prevWeekId) {
-        const data = await generateWeekApi.getData(prevWeekId);
+        const data = await weekGenerationApi.getData(prevWeekId);
         setRecurringTasks(data.recurringTasks);
         setIncompleteTasks(data.incompleteTasks);
         setFollowUps(data.followUps);
         setBacklogItems(data.backlogItems);
       } else {
         // Fresh start - just load recurring tasks
-        const data = await generateWeekApi.getData("");
+        const data = await weekGenerationApi.getData("");
         setRecurringTasks(data.recurringTasks);
       }
     } catch (err) {
@@ -123,7 +123,7 @@ export function WeekWizard() {
   async function handleGenerate() {
     try {
       setGenerating(true);
-      const week = await generateWeekApi.generate({
+      const week = await weekGenerationApi.generate({
         weekId: newWeekId,
         recurringTaskIds: recurringTasks.filter((t) => t.selected).map((t) => t.id),
         incompleteTaskIds: incompleteTasks.filter((t) => t.selected).map((t) => t.id),
