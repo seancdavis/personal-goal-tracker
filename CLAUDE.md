@@ -93,8 +93,9 @@ export const db = drizzle(sql, { schema });
 | `/api/backlog/:backlogItemId/notes` | GET | List notes |
 | `/api/follow-ups` | GET, POST | List/create follow-ups |
 | `/api/follow-ups/:id` | DELETE | Delete follow-up |
-| `/api/generate-week` | POST | Generate new week |
-| `/api/generate-week/data/:previousWeekId` | GET | Get wizard data |
+| `/api/weeks/new` | POST | Generate new week |
+| `/api/weeks/new/data` | GET | Get wizard data (no previous week) |
+| `/api/weeks/new/data/:previousWeekId` | GET | Get wizard data with previous week |
 | `/api/upload` | POST | Upload attachment |
 | `/api/attachments/:id` | DELETE | Delete attachment |
 | `/api/attachments/blob/*` | GET | Get blob content |
