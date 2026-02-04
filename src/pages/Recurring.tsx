@@ -1,49 +1,42 @@
-import { useEffect, useState } from "react";
+import { useState, useCallback } from "react";
 import { Plus, RotateCcw, Pause, Play, Trash2 } from "lucide-react";
-import { recurringTasksApi, categoriesApi } from "@/lib/api";
-import type { RecurringTask, Category } from "@/types";
+import { recurringTasksApi } from "@/lib/api";
+import type { RecurringTask } from "@/types";
+import { useAsyncData } from "@/hooks";
+import { useCategories } from "@/contexts/CategoriesContext";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Spinner } from "@/components/ui/Spinner";
 import { Badge } from "@/components/ui/Badge";
+import { AsyncSection } from "@/components/ui/AsyncSection";
+import { SkeletonCard } from "@/components/ui/Skeleton";
 import { RecurringForm } from "@/components/recurring/RecurringForm";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
+function TasksListSkeleton() {
+  return (
+    <div className="space-y-2">
+      {[1, 2, 3].map((i) => (
+        <SkeletonCard key={i} />
+      ))}
+    </div>
+  );
+}
+
 export function Recurring() {
-  const [tasks, setTasks] = useState<RecurringTask[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const fetchTasks = useCallback(() => recurringTasksApi.list(), []);
+  const tasks = useAsyncData(fetchTasks);
+  const categories = useCategories();
+
   const [showForm, setShowForm] = useState(false);
   const [editingTask, setEditingTask] = useState<RecurringTask | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  async function loadData() {
-    try {
-      setLoading(true);
-      const [tasksData, categoriesData] = await Promise.all([
-        recurringTasksApi.list(),
-        categoriesApi.list(),
-      ]);
-      setTasks(tasksData);
-      setCategories(categoriesData);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to load recurring tasks"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function handleToggle(id: number) {
     try {
       const updated = await recurringTasksApi.toggle(id);
-      setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+      tasks.setData((prev) =>
+        prev ? prev.map((t) => (t.id === id ? updated : t)) : prev
+      );
     } catch (err) {
       console.error("Failed to toggle task:", err);
     }
@@ -52,7 +45,7 @@ export function Recurring() {
   async function handleDelete(id: number) {
     try {
       await recurringTasksApi.delete(id);
-      setTasks((prev) => prev.filter((t) => t.id !== id));
+      tasks.setData((prev) => (prev ? prev.filter((t) => t.id !== id) : prev));
       setDeletingTaskId(null);
     } catch (err) {
       console.error("Failed to delete task:", err);
@@ -60,32 +53,16 @@ export function Recurring() {
   }
 
   function getCategoryName(categoryId: number | null): string | null {
-    if (!categoryId) return null;
-    return categories.find((c) => c.id === categoryId)?.name ?? null;
+    if (!categoryId || !categories.data) return null;
+    return categories.data.find((c) => c.id === categoryId)?.name ?? null;
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-red-600 mb-4">{error}</p>
-        <Button onClick={loadData}>Retry</Button>
-      </div>
-    );
-  }
-
-  const activeTasks = tasks.filter((t) => t.isActive);
-  const inactiveTasks = tasks.filter((t) => !t.isActive);
+  const activeTasks = tasks.data?.filter((t) => t.isActive) ?? [];
+  const inactiveTasks = tasks.data?.filter((t) => !t.isActive) ?? [];
 
   return (
     <div className="space-y-6">
+      {/* Header - renders immediately */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Recurring Tasks</h1>
@@ -99,72 +76,82 @@ export function Recurring() {
         </Button>
       </div>
 
-      {tasks.length === 0 ? (
-        <Card className="text-center py-12">
-          <RotateCcw className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-600 mb-4">
-            No recurring tasks yet. Create tasks that repeat every week.
-          </p>
-          <Button onClick={() => setShowForm(true)}>
-            <Plus className="w-4 h-4 mr-1.5" />
-            Add First Recurring Task
-          </Button>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {/* Active Tasks */}
-          {activeTasks.length > 0 && (
-            <div>
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Active ({activeTasks.length})
-              </h2>
-              <div className="space-y-2">
-                {activeTasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    categoryName={getCategoryName(task.categoryId)}
-                    onToggle={() => handleToggle(task.id)}
-                    onEdit={() => {
-                      setEditingTask(task);
-                      setShowForm(true);
-                    }}
-                    onDelete={() => setDeletingTaskId(task.id)}
-                  />
-                ))}
+      {/* Tasks List */}
+      <AsyncSection
+        data={tasks.data}
+        loading={tasks.loading}
+        error={tasks.error}
+        onRetry={tasks.refetch}
+        loadingElement={<TasksListSkeleton />}
+        emptyElement={
+          <Card className="text-center py-12">
+            <RotateCcw className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <p className="text-gray-600 mb-4">
+              No recurring tasks yet. Create tasks that repeat every week.
+            </p>
+            <Button onClick={() => setShowForm(true)}>
+              <Plus className="w-4 h-4 mr-1.5" />
+              Add First Recurring Task
+            </Button>
+          </Card>
+        }
+      >
+        {() => (
+          <div className="space-y-6">
+            {/* Active Tasks */}
+            {activeTasks.length > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                  Active ({activeTasks.length})
+                </h2>
+                <div className="space-y-2">
+                  {activeTasks.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      categoryName={getCategoryName(task.categoryId)}
+                      onToggle={() => handleToggle(task.id)}
+                      onEdit={() => {
+                        setEditingTask(task);
+                        setShowForm(true);
+                      }}
+                      onDelete={() => setDeletingTaskId(task.id)}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Inactive Tasks */}
-          {inactiveTasks.length > 0 && (
-            <div>
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                Paused ({inactiveTasks.length})
-              </h2>
-              <div className="space-y-2">
-                {inactiveTasks.map((task) => (
-                  <TaskRow
-                    key={task.id}
-                    task={task}
-                    categoryName={getCategoryName(task.categoryId)}
-                    onToggle={() => handleToggle(task.id)}
-                    onEdit={() => {
-                      setEditingTask(task);
-                      setShowForm(true);
-                    }}
-                    onDelete={() => setDeletingTaskId(task.id)}
-                  />
-                ))}
+            {/* Inactive Tasks */}
+            {inactiveTasks.length > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                  Paused ({inactiveTasks.length})
+                </h2>
+                <div className="space-y-2">
+                  {inactiveTasks.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      categoryName={getCategoryName(task.categoryId)}
+                      onToggle={() => handleToggle(task.id)}
+                      onEdit={() => {
+                        setEditingTask(task);
+                        setShowForm(true);
+                      }}
+                      onDelete={() => setDeletingTaskId(task.id)}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
+      </AsyncSection>
 
-      {showForm && (
+      {showForm && categories.data && (
         <RecurringForm
-          categories={categories}
+          categories={categories.data}
           task={editingTask}
           onClose={() => {
             setShowForm(false);
@@ -173,7 +160,7 @@ export function Recurring() {
           onSaved={() => {
             setShowForm(false);
             setEditingTask(null);
-            loadData();
+            tasks.refetch();
           }}
         />
       )}

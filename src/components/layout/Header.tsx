@@ -1,10 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
-import { CheckCircle2, ListTodo, RotateCcw, LayoutDashboard } from "lucide-react";
+import { CheckCircle2, ListTodo, RotateCcw, LayoutDashboard, FolderOpen } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/backlog", label: "Backlog", icon: ListTodo },
   { to: "/recurring", label: "Recurring", icon: RotateCcw },
+  { to: "/categories", label: "Categories", icon: FolderOpen },
 ];
 
 export function Header() {

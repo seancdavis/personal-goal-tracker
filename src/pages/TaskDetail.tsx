@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   ChevronLeft,
@@ -8,13 +8,15 @@ import {
   Forward,
   Plus,
 } from "lucide-react";
-import { tasksApi, notesApi, followUpsApi, categoriesApi } from "@/lib/api";
+import { tasksApi, notesApi, followUpsApi } from "@/lib/api";
 import { getStalenessDescription, getStalenessClasses } from "@/lib/scores";
-import type { TaskWithCategory, Note, Category } from "@/types";
+import { useAsyncData } from "@/hooks";
+import { useCategories } from "@/contexts/CategoriesContext";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Spinner } from "@/components/ui/Spinner";
 import { Badge } from "@/components/ui/Badge";
+import { AsyncSection } from "@/components/ui/AsyncSection";
+import { Skeleton, SkeletonCard } from "@/components/ui/Skeleton";
 import { MarkdownRenderer } from "@/components/markdown/MarkdownRenderer";
 import { NoteForm } from "@/components/tasks/NoteForm";
 import { NoteCard } from "@/components/tasks/NoteCard";
@@ -22,55 +24,76 @@ import { TaskForm } from "@/components/tasks/TaskForm";
 import { FollowUpForm } from "@/components/tasks/FollowUpForm";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 
+function TaskDetailSkeleton() {
+  return (
+    <Card className="p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-2">
+            <Skeleton className="h-5 w-20 rounded-full" />
+          </div>
+          <Skeleton className="h-8 w-3/4 mb-2" />
+          <Skeleton className="h-4 w-1/2" />
+        </div>
+        <Skeleton className="h-8 w-32 rounded" />
+      </div>
+      <div className="mt-6 pt-4 border-t">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-8 w-16 rounded" />
+          <Skeleton className="h-8 w-24 rounded" />
+          <Skeleton className="h-8 w-32 rounded" />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function NotesListSkeleton() {
+  return (
+    <div className="space-y-3">
+      {[1, 2].map((i) => (
+        <SkeletonCard key={i} />
+      ))}
+    </div>
+  );
+}
+
 export function TaskDetail() {
   const { weekId, taskId } = useParams<{ weekId: string; taskId: string }>();
   const navigate = useNavigate();
-  const [task, setTask] = useState<TaskWithCategory | null>(null);
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const categories = useCategories();
+
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [showFollowUpForm, setShowFollowUpForm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, [taskId]);
+  const fetchTask = useCallback(
+    () => tasksApi.get(Number(taskId)),
+    [taskId]
+  );
+  const fetchNotes = useCallback(
+    () => notesApi.listByTask(Number(taskId)),
+    [taskId]
+  );
 
-  async function loadData() {
-    try {
-      setLoading(true);
-      const [taskData, notesData, categoriesData] = await Promise.all([
-        tasksApi.get(Number(taskId)),
-        notesApi.listByTask(Number(taskId)),
-        categoriesApi.list(),
-      ]);
-      setTask(taskData);
-      setNotes(notesData);
-      setCategories(categoriesData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load task");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const task = useAsyncData(fetchTask, { deps: [taskId] });
+  const notes = useAsyncData(fetchNotes, { deps: [taskId] });
 
   async function handleToggle() {
-    if (!task) return;
+    if (!task.data) return;
     try {
-      const updated = await tasksApi.toggleStatus(task.id);
-      setTask({ ...task, ...updated });
+      const updated = await tasksApi.toggleStatus(task.data.id);
+      task.setData((prev) => (prev ? { ...prev, ...updated } : prev));
     } catch (err) {
       console.error("Failed to toggle task:", err);
     }
   }
 
   async function handleDelete() {
-    if (!task) return;
+    if (!task.data) return;
     try {
-      await tasksApi.delete(task.id);
+      await tasksApi.delete(task.data.id);
       navigate(`/weeks/${weekId}`);
     } catch (err) {
       console.error("Failed to delete task:", err);
@@ -78,9 +101,9 @@ export function TaskDetail() {
   }
 
   async function handleMoveToBacklog() {
-    if (!task) return;
+    if (!task.data) return;
     try {
-      await tasksApi.moveToBacklog(task.id);
+      await tasksApi.moveToBacklog(task.data.id);
       navigate(`/weeks/${weekId}`);
     } catch (err) {
       console.error("Failed to move to backlog:", err);
@@ -88,10 +111,10 @@ export function TaskDetail() {
   }
 
   async function handleCreateFollowUp(data: { title: string; content: string }) {
-    if (!task) return;
+    if (!task.data) return;
     await followUpsApi.create({
-      sourceTaskId: task.id,
-      categoryId: task.categoryId,
+      sourceTaskId: task.data.id,
+      categoryId: task.data.categoryId,
       title: data.title,
       contentMarkdown: data.content || null,
     });
@@ -100,36 +123,16 @@ export function TaskDetail() {
 
   async function handleNoteCreated() {
     setShowNoteForm(false);
-    const notesData = await notesApi.listByTask(Number(taskId));
-    setNotes(notesData);
+    notes.refetch();
   }
 
   async function handleNoteDeleted(noteId: number) {
-    setNotes((prev) => prev.filter((n) => n.id !== noteId));
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
-  if (error || !task) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-red-600 mb-4">{error || "Task not found"}</p>
-        <Link to={`/weeks/${weekId}`}>
-          <Button variant="outline">Back to Week</Button>
-        </Link>
-      </div>
-    );
+    notes.setData((prev) => (prev ? prev.filter((n) => n.id !== noteId) : prev));
   }
 
   return (
     <div className="space-y-6">
-      {/* Back Link */}
+      {/* Back Link - renders immediately */}
       <Link
         to={`/weeks/${weekId}`}
         className="inline-flex items-center text-sm text-gray-600 hover:text-gray-900"
@@ -139,64 +142,82 @@ export function TaskDetail() {
       </Link>
 
       {/* Task Header */}
-      <Card className={`p-6 ${getStalenessClasses(task.stalenessCount)}`}>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2">
-              {task.category && (
-                <Badge variant="secondary">{task.category.name}</Badge>
-              )}
-              {task.isRecurring && <Badge variant="outline">Recurring</Badge>}
-              {task.stalenessCount > 0 && (
-                <Badge variant="warning">
-                  {getStalenessDescription(task.stalenessCount)}
-                </Badge>
-              )}
-            </div>
-            <h1 className="text-2xl font-bold mb-2">{task.title}</h1>
-            {task.contentHtml && (
-              <MarkdownRenderer html={task.contentHtml} />
-            )}
+      <AsyncSection
+        data={task.data}
+        loading={task.loading}
+        error={task.error}
+        onRetry={task.refetch}
+        loadingElement={<TaskDetailSkeleton />}
+        errorElement={
+          <div className="text-center py-12">
+            <p className="text-red-600 mb-4">{task.error || "Task not found"}</p>
+            <Link to={`/weeks/${weekId}`}>
+              <Button variant="outline">Back to Week</Button>
+            </Link>
           </div>
-          <Button
-            variant={task.status === "completed" ? "default" : "outline"}
-            size="sm"
-            onClick={handleToggle}
-          >
-            <Check className="w-4 h-4 mr-1" />
-            {task.status === "completed" ? "Completed" : "Mark Complete"}
-          </Button>
-        </div>
+        }
+      >
+        {(taskData) => (
+          <Card className={`p-6 ${getStalenessClasses(taskData.stalenessCount)}`}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  {taskData.category && (
+                    <Badge variant="secondary">{taskData.category.name}</Badge>
+                  )}
+                  {taskData.isRecurring && <Badge variant="outline">Recurring</Badge>}
+                  {taskData.stalenessCount > 0 && (
+                    <Badge variant="warning">
+                      {getStalenessDescription(taskData.stalenessCount)}
+                    </Badge>
+                  )}
+                </div>
+                <h1 className="text-2xl font-bold mb-2">{taskData.title}</h1>
+                {taskData.contentHtml && (
+                  <MarkdownRenderer html={taskData.contentHtml} />
+                )}
+              </div>
+              <Button
+                variant={taskData.status === "completed" ? "default" : "outline"}
+                size="sm"
+                onClick={handleToggle}
+              >
+                <Check className="w-4 h-4 mr-1" />
+                {taskData.status === "completed" ? "Completed" : "Mark Complete"}
+              </Button>
+            </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 mt-6 pt-4 border-t">
-          <Button variant="ghost" size="sm" onClick={() => setShowEditForm(true)}>
-            Edit
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowFollowUpForm(true)}
-          >
-            <Forward className="w-4 h-4 mr-1" />
-            Follow-up
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleMoveToBacklog}>
-            <Archive className="w-4 h-4 mr-1" />
-            Move to Backlog
-          </Button>
-          <div className="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-            onClick={() => setShowDeleteConfirm(true)}
-          >
-            <Trash2 className="w-4 h-4 mr-1" />
-            Delete
-          </Button>
-        </div>
-      </Card>
+            {/* Actions */}
+            <div className="flex items-center gap-2 mt-6 pt-4 border-t">
+              <Button variant="ghost" size="sm" onClick={() => setShowEditForm(true)}>
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowFollowUpForm(true)}
+              >
+                <Forward className="w-4 h-4 mr-1" />
+                Follow-up
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleMoveToBacklog}>
+                <Archive className="w-4 h-4 mr-1" />
+                Move to Backlog
+              </Button>
+              <div className="flex-1" />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                <Trash2 className="w-4 h-4 mr-1" />
+                Delete
+              </Button>
+            </div>
+          </Card>
+        )}
+      </AsyncSection>
 
       {/* Notes Section */}
       <div>
@@ -208,41 +229,50 @@ export function TaskDetail() {
           </Button>
         </div>
 
-        {notes.length === 0 ? (
-          <Card className="text-center py-8 text-gray-500">
-            No notes yet. Add a note to track progress or details.
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {notes.map((note) => (
-              <NoteCard
-                key={note.id}
-                note={note}
-                onDeleted={() => handleNoteDeleted(note.id)}
-              />
-            ))}
-          </div>
-        )}
+        <AsyncSection
+          data={notes.data}
+          loading={notes.loading}
+          error={notes.error}
+          onRetry={notes.refetch}
+          loadingElement={<NotesListSkeleton />}
+          emptyElement={
+            <Card className="text-center py-8 text-gray-500">
+              No notes yet. Add a note to track progress or details.
+            </Card>
+          }
+        >
+          {(notesList) => (
+            <div className="space-y-3">
+              {notesList.map((note) => (
+                <NoteCard
+                  key={note.id}
+                  note={note}
+                  onDeleted={() => handleNoteDeleted(note.id)}
+                />
+              ))}
+            </div>
+          )}
+        </AsyncSection>
       </div>
 
       {/* Modals */}
-      {showNoteForm && (
+      {showNoteForm && task.data && (
         <NoteForm
-          taskId={task.id}
+          taskId={task.data.id}
           onClose={() => setShowNoteForm(false)}
           onSaved={handleNoteCreated}
         />
       )}
 
-      {showEditForm && (
+      {showEditForm && task.data && categories.data && (
         <TaskForm
           weekId={weekId!}
-          categories={categories}
-          task={task}
+          categories={categories.data}
+          task={task.data}
           onClose={() => setShowEditForm(false)}
           onSaved={() => {
             setShowEditForm(false);
-            loadData();
+            task.refetch();
           }}
         />
       )}

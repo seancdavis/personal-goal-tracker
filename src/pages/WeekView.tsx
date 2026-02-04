@@ -1,16 +1,19 @@
-import { useEffect, useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
-import { weeksApi, tasksApi, categoriesApi } from "@/lib/api";
+import { weeksApi, tasksApi } from "@/lib/api";
 import {
   formatWeekRange,
   getNextWeekId,
   getPreviousWeekId,
 } from "@/lib/dates";
-import type { Week, TaskWithCategory, Category } from "@/types";
+import type { TaskWithCategory, Category } from "@/types";
+import { useAsyncData } from "@/hooks";
+import { useCategories } from "@/contexts/CategoriesContext";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Spinner } from "@/components/ui/Spinner";
+import { AsyncSection } from "@/components/ui/AsyncSection";
+import { Skeleton, SkeletonCard } from "@/components/ui/Skeleton";
 import { ScoreIndicator } from "@/components/weeks/ScoreIndicator";
 import { TaskCard } from "@/components/tasks/TaskCard";
 import { TaskForm } from "@/components/tasks/TaskForm";
@@ -21,48 +24,61 @@ interface GroupedTasks {
   tasks: TaskWithCategory[];
 }
 
+function WeekHeaderSkeleton() {
+  return (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-4">
+        <Skeleton className="w-8 h-8 rounded" />
+        <div>
+          <Skeleton className="h-7 w-48 mb-1" />
+          <Skeleton className="h-4 w-24" />
+        </div>
+        <Skeleton className="w-8 h-8 rounded" />
+      </div>
+      <Skeleton className="w-16 h-16 rounded-full" />
+    </div>
+  );
+}
+
+function TasksListSkeleton() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <Skeleton className="h-4 w-24 mb-3" />
+        <div className="space-y-2">
+          {[1, 2, 3].map((i) => (
+            <SkeletonCard key={i} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function WeekView() {
   const { weekId } = useParams<{ weekId: string }>();
-  const [week, setWeek] = useState<Week | null>(null);
-  const [tasks, setTasks] = useState<TaskWithCategory[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const categories = useCategories();
   const [showTaskForm, setShowTaskForm] = useState(false);
 
-  useEffect(() => {
-    if (weekId) {
-      loadData();
-    }
-  }, [weekId]);
+  const fetchWeek = useCallback(
+    () => weeksApi.get(weekId!),
+    [weekId]
+  );
+  const fetchTasks = useCallback(
+    () => tasksApi.listByWeek(weekId!),
+    [weekId]
+  );
 
-  async function loadData() {
-    try {
-      setLoading(true);
-      setError(null);
-      const [weekData, tasksData, categoriesData] = await Promise.all([
-        weeksApi.get(weekId!),
-        tasksApi.listByWeek(weekId!),
-        categoriesApi.list(),
-      ]);
-      setWeek(weekData);
-      setTasks(tasksData);
-      setCategories(categoriesData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load week");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const week = useAsyncData(fetchWeek, { deps: [weekId] });
+  const tasks = useAsyncData(fetchTasks, { deps: [weekId] });
 
   const groupedTasks = useMemo((): GroupedTasks[] => {
-    const groups = new Map<number | null, GroupedTasks>();
+    if (!tasks.data) return [];
 
-    // Initialize with "uncategorized" group
+    const groups = new Map<number | null, GroupedTasks>();
     groups.set(null, { categoryId: null, category: null, tasks: [] });
 
-    // Group tasks by category
-    for (const task of tasks) {
+    for (const task of tasks.data) {
       const key = task.categoryId;
       if (!groups.has(key)) {
         groups.set(key, {
@@ -74,7 +90,6 @@ export function WeekView() {
       groups.get(key)!.tasks.push(task);
     }
 
-    // Sort groups: categories first (alphabetically), then uncategorized
     return Array.from(groups.values())
       .filter((g) => g.tasks.length > 0)
       .sort((a, b) => {
@@ -82,17 +97,18 @@ export function WeekView() {
         if (b.category === null) return -1;
         return a.category.name.localeCompare(b.category.name);
       });
-  }, [tasks]);
+  }, [tasks.data]);
 
   async function handleToggleTask(taskId: number) {
     try {
       const updatedTask = await tasksApi.toggleStatus(taskId);
-      setTasks((prev) =>
-        prev.map((t) => (t.id === taskId ? { ...t, ...updatedTask } : t))
+      // Optimistic update for tasks
+      tasks.setData((prev) =>
+        prev ? prev.map((t) => (t.id === taskId ? { ...t, ...updatedTask } : t)) : prev
       );
       // Refresh week stats
       const updatedWeek = await weeksApi.get(weekId!);
-      setWeek(updatedWeek);
+      week.setData(updatedWeek);
     } catch (err) {
       console.error("Failed to toggle task:", err);
     }
@@ -100,56 +116,59 @@ export function WeekView() {
 
   async function handleTaskCreated() {
     setShowTaskForm(false);
-    await loadData();
+    // Only refresh tasks section
+    tasks.refetch();
+    // Also refresh week stats
+    week.refetch();
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner size="lg" />
-      </div>
-    );
-  }
-
-  if (error || !week) {
-    return (
-      <div className="text-center py-12">
-        <p className="text-red-600 mb-4">{error || "Week not found"}</p>
-        <Link to="/">
-          <Button variant="outline">Back to Dashboard</Button>
-        </Link>
-      </div>
-    );
-  }
-
+  // Header renders with navigation even while loading
   return (
     <div className="space-y-6">
       {/* Week Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to={`/weeks/${getPreviousWeekId(weekId!)}`}>
-            <Button variant="ghost" size="sm">
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold">{formatWeekRange(weekId!)}</h1>
-            <p className="text-sm text-gray-500">Week {weekId}</p>
+      <AsyncSection
+        data={week.data}
+        loading={week.loading}
+        error={week.error}
+        onRetry={week.refetch}
+        loadingElement={<WeekHeaderSkeleton />}
+        errorElement={
+          <div className="text-center py-12">
+            <p className="text-red-600 mb-4">{week.error || "Week not found"}</p>
+            <Link to="/">
+              <Button variant="outline">Back to Dashboard</Button>
+            </Link>
           </div>
-          <Link to={`/weeks/${getNextWeekId(weekId!)}`}>
-            <Button variant="ghost" size="sm">
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </Link>
-        </div>
-        <ScoreIndicator
-          completed={week.completedTasks}
-          total={week.totalTasks}
-          size="lg"
-        />
-      </div>
+        }
+      >
+        {(weekData) => (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link to={`/weeks/${getPreviousWeekId(weekId!)}`}>
+                <Button variant="ghost" size="sm">
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+              </Link>
+              <div>
+                <h1 className="text-2xl font-bold">{formatWeekRange(weekId!)}</h1>
+                <p className="text-sm text-gray-500">Week {weekId}</p>
+              </div>
+              <Link to={`/weeks/${getNextWeekId(weekId!)}`}>
+                <Button variant="ghost" size="sm">
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </Link>
+            </div>
+            <ScoreIndicator
+              completed={weekData.completedTasks}
+              total={weekData.totalTasks}
+              size="lg"
+            />
+          </div>
+        )}
+      </AsyncSection>
 
-      {/* Add Task Button */}
+      {/* Add Task Button - renders immediately */}
       <div className="flex justify-end">
         <Button onClick={() => setShowTaskForm(true)}>
           <Plus className="w-4 h-4 mr-1.5" />
@@ -158,45 +177,54 @@ export function WeekView() {
       </div>
 
       {/* Task Form Modal */}
-      {showTaskForm && (
+      {showTaskForm && categories.data && (
         <TaskForm
           weekId={weekId!}
-          categories={categories}
+          categories={categories.data}
           onClose={() => setShowTaskForm(false)}
           onSaved={handleTaskCreated}
         />
       )}
 
       {/* Tasks by Category */}
-      {groupedTasks.length === 0 ? (
-        <Card className="text-center py-12">
-          <p className="text-gray-600 mb-4">No tasks yet for this week.</p>
-          <Button onClick={() => setShowTaskForm(true)}>
-            <Plus className="w-4 h-4 mr-1.5" />
-            Add First Task
-          </Button>
-        </Card>
-      ) : (
-        <div className="space-y-6">
-          {groupedTasks.map((group) => (
-            <div key={group.categoryId ?? "uncategorized"}>
-              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                {group.category?.name ?? "Uncategorized"}
-              </h2>
-              <div className="space-y-2">
-                {group.tasks.map((task) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    weekId={weekId!}
-                    onToggle={() => handleToggleTask(task.id)}
-                  />
-                ))}
+      <AsyncSection
+        data={tasks.data}
+        loading={tasks.loading}
+        error={tasks.error}
+        onRetry={tasks.refetch}
+        loadingElement={<TasksListSkeleton />}
+        emptyElement={
+          <Card className="text-center py-12">
+            <p className="text-gray-600 mb-4">No tasks yet for this week.</p>
+            <Button onClick={() => setShowTaskForm(true)}>
+              <Plus className="w-4 h-4 mr-1.5" />
+              Add First Task
+            </Button>
+          </Card>
+        }
+      >
+        {() => (
+          <div className="space-y-6">
+            {groupedTasks.map((group) => (
+              <div key={group.categoryId ?? "uncategorized"}>
+                <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                  {group.category?.name ?? "Uncategorized"}
+                </h2>
+                <div className="space-y-2">
+                  {group.tasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      weekId={weekId!}
+                      onToggle={() => handleToggleTask(task.id)}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </AsyncSection>
     </div>
   );
 }
